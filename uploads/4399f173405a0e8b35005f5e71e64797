@@ -1,0 +1,123 @@
+cREATE TABLE  "LOCATION" 
+   (	"WORD_ID" NUMBER, 
+	"TEXT_ID" NUMBER, 
+	"WORD_ROW" NUMBER, 
+	"WORD_COLUMN" NUMBER, 
+	"CONTEXT_START_ROW" NUMBER, 
+	"CONTEXT_START_COLUMN" NUMBER, 
+	"CONTEXT_END_ROW" NUMBER, 
+	"CONTEXT_END_COLUMN" NUMBER, 
+	"WORD_POSITION" NUMBER, 
+	"CONTEXT_START_POSITION" NUMBER, 
+	"CONTEXT_END_POSITION" NUMBER, 
+	"WORD" VARCHAR2(4000) NOT NULL ENABLE, 
+	"GROUP_ID" NUMBER, 
+	 CONSTRAINT "LOCATION_UNIQUE" UNIQUE ("TEXT_ID", "WORD", "WORD_POSITION", "GROUP_ID") ENABLE, 
+	 CONSTRAINT "LOCATION_GROUP_OR_TEXT_CHECK" CHECK (((text_id is not null and word_row is not null and word_column is not null and word_position is not null) or (group_id is not null))and(text_id is null or group_id is null)) ENABLE, 
+	 CONSTRAINT "LOCATION_TEXT_FK" FOREIGN KEY ("TEXT_ID")
+	  REFERENCES  "TEXT" ("ID") ON DELETE CASCADE ENABLE, 
+	 CONSTRAINT "LOCATION_GROUP_FK" FOREIGN KEY ("GROUP_ID")
+	  REFERENCES  "SPEC_GROUP" ("ID") ON DELETE CASCADE ENABLE
+   )
+/
+
+
+
+CREATE TABLE  "LOCATION_EXTERNAL" 
+   (	"WORD" VARCHAR2(100), 
+	"WORD_ROW" VARCHAR2(10), 
+	"WORD_COLUMN" VARCHAR2(10), 
+	"WORD_POSITION" VARCHAR2(20), 
+	"CONTEXT_START_POSITION" VARCHAR2(20), 
+	"CONTEXT_END_POSITION" VARCHAR2(20), 
+	"CONTEXT_START_ROW" VARCHAR2(10), 
+	"CONTEXT_START_COLUMN" VARCHAR2(10), 
+	"CONTEXT_END_ROW" VARCHAR2(10), 
+	"CONTEXT_END_COLUMN" VARCHAR2(10)
+   ) 
+   ORGANIZATION EXTERNAL 
+    ( TYPE ORACLE_LOADER
+      DEFAULT DIRECTORY "EXT"
+      ACCESS PARAMETERS
+      ( records delimited by newline
+          BADFILE 'b.txt'
+          DISCARDFILE 'd.txt'
+          fields terminated by ','
+          missing field values are null
+            (
+            word,word_row,word_column,word_position,context_start_position,context_end_position,context_start_row,context_start_column,context_end_row,context_end_column
+            )
+                                              )
+      LOCATION
+       ( 'words_locations.csv'
+       )
+    )
+/
+
+
+
+Destination Folder: C:\oraclexe\
+Oracle Home: C:\oraclexe\app\oracle\product\11.2.0\server\
+Oracle Base:C:\oraclexe\
+Port for 'Oracle Database Listener': 1521
+Port for 'Oracle Services for Microsoft Transaction Server': 2030
+Port for 'Oracle HTTP Listener': 8080
+
+
+
+
+public ArrayList<String> getVocabularyList(Corpus corpus)
+			throws SQLException {
+		if (corpus == null)
+			return null;
+
+		String[] texts = corpus.getTexts();
+		String[] groups = corpus.getGroups();
+		if (texts.length == 0 && groups.length == 0) {
+			return null;
+		}
+		ArrayList<String> list = new ArrayList<String>();
+		PreparedStatement ps = null;
+		ResultSet rs = null;
+		StringBuilder selectQuery = new StringBuilder();
+		selectQuery
+				.append("select word "
+						+ "from (select row_number() over (partition by word order by word nulls last) as rn, word "
+						+ "from (select word from location where ");
+		if (texts.length > 0) {
+			selectQuery
+					.append("text_id in(select id from text where filepath in(?");
+			for (int i = 1; i < texts.length; i++) {
+				selectQuery.append(",?");
+			}
+			selectQuery.append("))");
+			if (groups.length > 0) {
+				selectQuery.append(" or ");
+			}
+		}
+		if (groups.length > 0) {
+			selectQuery
+					.append(" group_id in(select id from spec_group where group_name in (?");
+			for (int i = 1; i < groups.length; i++) {
+				selectQuery.append(",?");
+			}
+			selectQuery.append("))");
+		}
+		selectQuery.append(") ) where rn=1 order by word");
+		ps = conn.prepareStatement(selectQuery.toString());
+		int index = 1;
+		for (int i = 0; i < texts.length; i++) {
+			ps.setString(index++, texts[i]);
+		}
+		for (int i = 0; i < groups.length; i++) {
+			ps.setString(index++, groups[i]);
+		}
+		ps.execute();
+		rs = ps.getResultSet();
+
+		while (rs.next()) {
+			list.add(rs.getString(1));
+		}
+
+		return list;
+	}
